@@ -1,35 +1,37 @@
 # vcfparallel.py
 
 import pandas as pd
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from multiprocessing import Pool, cpu_count
 
-def _apply_func_to_row(row, func, *args, **kwargs):
-    """Applies a function to a DataFrame row."""
-    return func(row, *args, **kwargs)
+def _apply_func_to_row(args):
+    """Unwrapper function for applying a function to a row."""
+    func, row = args[:2]
+    return func(row, *args[2:])
 
-def parallel_apply(df, func, num_threads=4, *args, **kwargs):
-    """Applies a function to each row of a DataFrame in parallel.
+def parallel_apply(df, func, num_processes=None, *args, **kwargs):
+    """Applies a function to each row of a DataFrame in parallel using multiprocessing.
     
     Args:
         df (pd.DataFrame): The DataFrame to process.
         func (callable): The function to apply to each row.
-        num_threads (int, optional): Number of threads to use.
+        num_processes (int, optional): Number of processes to use. Defaults to the number of CPU cores.
         *args, **kwargs: Additional arguments for the `func` function.
     
     Returns:
         pd.DataFrame: The resulting DataFrame.
     """
-    # Split the DataFrame into chunks for parallel processing
-    rows = [row for _, row in df.iterrows()]
-    results = []
+    if num_processes is None:
+        num_processes = cpu_count()
     
-    # Use ThreadPoolExecutor to parallelize the function application
-    with ThreadPoolExecutor(max_workers=num_threads) as executor:
-        future_to_row = {executor.submit(_apply_func_to_row, row, func, *args, **kwargs): row for row in rows}
-        for future in as_completed(future_to_row):
-            results.append(future.result())
+    # Prepare data for multiprocessing
+    rows = df.to_dict(orient='records')  # Convert DataFrame to a list of dictionaries
+    pool_data = [(func, row, *args) for row in rows]
     
-    # Create a new DataFrame from the results
+    # Use multiprocessing Pool to parallelize the operation
+    with Pool(processes=num_processes) as pool:
+        results = pool.map(_apply_func_to_row, pool_data)
+    
+    # Convert results back to DataFrame
     result_df = pd.DataFrame(results)
     
     # Sort the resulting DataFrame by CHROM and POS if present
